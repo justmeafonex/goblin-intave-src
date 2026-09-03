@@ -1,0 +1,206 @@
+/*
+ * Copyright 2026 Intave
+ *
+ * This software is licensed under the PolyForm Perimeter License 1.0.0.
+ * You may use this software for any purpose, except for providing to
+ * others any product that competes with the software.
+ *
+ * A copy of the license is available at:
+ *   https://polyformproject.org/licenses/perimeter/1.0.0/
+ */
+
+package de.jpx3.intave.block.fluid;
+
+import de.jpx3.intave.IntaveLogger;
+import de.jpx3.intave.IntavePlugin;
+import de.jpx3.intave.access.IntaveInternalException;
+import de.jpx3.intave.block.cache.BlockCache;
+import de.jpx3.intave.block.variant.BlockVariant;
+import de.jpx3.intave.block.variant.BlockVariantRegister;
+import de.jpx3.intave.klass.rewrite.PatchyLoadingInjector;
+import de.jpx3.intave.share.BlockPosition;
+import de.jpx3.intave.share.MutableBlockPosition;
+import de.jpx3.intave.share.Position;
+import de.jpx3.intave.user.User;
+import org.bukkit.Location;
+import org.bukkit.Material;
+import org.jetbrains.annotations.NotNull;
+
+import java.util.EnumMap;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+import static de.jpx3.intave.adapter.MinecraftVersions.*;
+
+public final class Fluids {
+  private static final Map<Material, Map<Integer, Fluid>> liquidData = new EnumMap<>(Material.class);
+	private static final FluidFlow v8Fluidflow = new v8Fluidflow();
+  private static final FluidFlow v13Fluidflow = new v13Fluidflow();
+
+  public static void setup() {
+    String className;
+    if (VER26_1_1.atOrAbove()) {
+      className = "de.jpx3.intave.block.fluid.v26FluidResolver";
+    } else if (VER1_18_2.atOrAbove()) {
+      className = "de.jpx3.intave.block.fluid.v18b2FluidResolver";
+    } else if (VER1_16_0.atOrAbove()) {
+      className = "de.jpx3.intave.block.fluid.v16FluidResolver";
+    } else if (VER1_15_0.atOrAbove()) {
+      className = "de.jpx3.intave.block.fluid.v15FluidResolver";
+    } else if (VER1_14_0.atOrAbove()) {
+      className = "de.jpx3.intave.block.fluid.v14FluidResolver";
+    } else if (VER1_13_0.atOrAbove()) {
+      className = "de.jpx3.intave.block.fluid.v13FluidResolver";
+    } else if (VER1_12_0.atOrAbove()) {
+      className = "de.jpx3.intave.block.fluid.v12FluidResolver";
+    } else {
+      className = "de.jpx3.intave.block.fluid.v8FluidResolver";
+    }
+    PatchyLoadingInjector.loadUnloadedClassPatched(IntavePlugin.class.getClassLoader(), className);
+	  FluidResolver resolver;
+	  try {
+      resolver = (FluidResolver) Class.forName(className).newInstance();
+    } catch (Exception exception) {
+      throw new IntaveInternalException(exception);
+    }
+
+    for (Material value : Material.values()) {
+      if (value.isBlock()) {
+        boolean anyLiquid = false;
+        Map<Integer, Fluid> variants = new HashMap<>();
+        for (int variantIndex : BlockVariantRegister.variantIdsOf(value)) {
+          try {
+            Fluid currentFluid = resolver.liquidFrom(value, variantIndex);
+            variants.put(variantIndex, currentFluid);
+            anyLiquid |= !currentFluid.isDry();
+          } catch (Exception exception) {
+            BlockVariant properties = BlockVariantRegister.uncachedVariantOf(value, variantIndex);
+            String propertyString = "{" + properties.propertyNames().stream().map(s -> s + ": " + properties.propertyOf(s)).collect(Collectors.joining(", ")) + "}";
+            IntaveLogger.logger().error("Failed to index fluid " + value + ":" + variantIndex + " " + propertyString);
+            exception.printStackTrace();
+          }
+        }
+        if (anyLiquid) {
+          liquidData.put(value, variants);
+        }
+      }
+    }
+  }
+
+  public static void overrideFluids(
+    Map<Material, Map<Integer, Fluid>> newFluids
+  ) {
+    liquidData.clear();
+    liquidData.putAll(newFluids);
+  }
+
+  public static FluidFlow suitableFluidflowFor(User user) {
+    return user.meta().protocol().aquaticUpdate() ? v13Fluidflow : v8Fluidflow;
+  }
+
+  public static FluidFlow anyWaterflow() {
+    return v8Fluidflow;
+  }
+
+  public static boolean canContainFluid(Material material) {
+    return liquidData.containsKey(material);
+  }
+
+  public static boolean isFluid(Material material, int variantIndex) {
+    Map<Integer, Fluid> liquidMappings = liquidData.get(material);
+    return liquidMappings != null && liquidMappings.containsKey(variantIndex)
+      && !liquidMappings.get(variantIndex).isDry();
+  }
+
+  public static @NotNull Fluid fluidStateOf(Material material, int variant) {
+    Map<Integer, Fluid> map = liquidData.get(material);
+    if (map == null) {
+      return Dry.of();
+    }
+    Fluid fluid = map.get(variant);
+    if (fluid == null) {
+      return Dry.of();
+    }
+    return fluid;
+  }
+
+  public static @NotNull Fluid fluidAt(User user, Position position) {
+    return fluidAt(user, position.getBlockX(), position.getBlockY(), position.getBlockZ());
+  }
+
+  @Deprecated
+  // use VolatileBlockAccess instead
+  public static @NotNull Fluid fluidAt(User user, Location location) {
+    return fluidAt(user, location.getBlockX(), location.getBlockY(), location.getBlockZ());
+  }
+
+  @Deprecated
+  // use VolatileBlockAccess instead
+  public static @NotNull Fluid fluidAt(User user, BlockPosition position) {
+    return fluidAt(user, position.getX(), position.getY(), position.getZ());
+  }
+
+  @Deprecated
+  // use VolatileBlockAccess instead
+  public static @NotNull Fluid fluidAt(User user, double x, double y, double z) {
+    return fluidAt(user, floor(x), floor(y), floor(z));
+  }
+
+  @Deprecated
+  // use VolatileBlockAccess instead
+  public static @NotNull Fluid fluidAt(User user, int x, int y, int z) {
+    BlockCache states = user.blockCache();
+    Material type = states.typeAt(x, y, z);
+    Map<Integer, Fluid> stateMap = liquidData.get(type);
+    if (stateMap == null) {
+      return Dry.of();
+    }
+    int variant = states.variantIndexAt(x, y, z);
+    Fluid fluid = stateMap.get(variant);
+    if (fluid == null) {
+      return Dry.of();
+    }
+    return fluid;
+  }
+
+  public static boolean fluidPresentAt(User user, Position position) {
+    return fluidPresentAt(user, position.getBlockX(), position.getBlockY(), position.getBlockZ());
+  }
+
+  public static boolean fluidPresentAt(User user, Location location) {
+    return fluidPresentAt(user, location.getBlockX(), location.getBlockY(), location.getBlockZ());
+  }
+
+  public static boolean fluidPresentAt(User user, BlockPosition position) {
+    return fluidPresentAt(user, position.getX(), position.getY(), position.getZ());
+  }
+
+  public static boolean fluidPresentAt(User user, MutableBlockPosition position) {
+    return fluidPresentAt(user, position.x(), position.y(), position.z());
+  }
+
+  public static boolean fluidPresentAt(User user, double x, double y, double z) {
+    return fluidPresentAt(user, floor(x), floor(y), floor(z));
+  }
+
+  public static boolean fluidPresentAt(User user, int x, int y, int z) {
+    BlockCache cache = user.blockCache();
+    Material type = cache.typeAt(x, y, z);
+    Map<Integer, Fluid> stateMap = liquidData.get(type);
+    if (stateMap == null) {
+      return false;
+    }
+    int variant = cache.variantIndexAt(x, y, z);
+    Fluid fluid = stateMap.get(variant);
+    if (fluid == null) {
+      return false;
+    }
+    return !fluid.isDry();
+  }
+
+  private static int floor(double value) {
+    int i = (int) value;
+    return value < (double) i ? i - 1 : i;
+  }
+}

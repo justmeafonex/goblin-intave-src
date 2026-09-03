@@ -1,0 +1,15 @@
+# Config Transfer Variables
+
++Variables
+physics-mm -> check.physics.mitigation
+timer-tolerance -> check.timer.tolerance
+rejoin-delay -> rejoin.delay
+prefix -> layout.prefix
+verbose -> layout.verbose
+notify -> layout.notify
+cloud-token -> check.cloud.token
+privacy -> check.cloud.privacy-mode
+
++Placeholders
+kick-commands -> $kick$
+ban-commands -> $ban$

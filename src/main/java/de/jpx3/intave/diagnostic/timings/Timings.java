@@ -1,0 +1,102 @@
+/*
+ * Copyright 2026 Intave
+ *
+ * This software is licensed under the PolyForm Perimeter License 1.0.0.
+ * You may use this software for any purpose, except for providing to
+ * others any product that competes with the software.
+ *
+ * A copy of the license is available at:
+ *   https://polyformproject.org/licenses/perimeter/1.0.0/
+ */
+
+package de.jpx3.intave.diagnostic.timings;
+
+import com.comphenix.protocol.PacketType;
+import com.google.common.collect.Maps;
+import org.bukkit.ChatColor;
+import org.bukkit.event.Event;
+
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.stream.Collectors;
+
+public class Timings {
+  private static final List<Timing> timingPool = new CopyOnWriteArrayList<>();
+  private static final Map<String, Timing> eventTimings = Maps.newConcurrentMap();
+  private static final Map<String, Timing> packetTimings = Maps.newConcurrentMap();
+  private static final Map<Class<?>, String> classNameCache = Maps.newConcurrentMap();
+
+  public static final Timing CHECK_PHYSICS_PROC = Timing.of("Check/Physics/Proc", "Exe/Netty");
+  public static final Timing CHECK_PHYSICS_PROC_ITR = Timing.of("Check/Physics/Proc/Itr", "Check/Physics/Proc");
+  public static final Timing CHECK_PHYSICS_PROC_ITR_BUILD_CONFIGS = Timing.of("Check/Physics/Proc/Itr/BC", "Check/Physics/Proc/Itr");
+
+  public static final Timing CHECK_PHYSICS_SIMULATOR = Timing.of("Check/Physics/Simulator", "Check/Physics");
+  public static final Timing CHECK_PHYSICS_SIMULATOR_PRE_TICK = Timing.of("Check/Physics/Simulator/PreTick", "Check/Physics/Simulator");
+  public static final Timing CHECK_PHYSICS_SIMULATOR_BASE = Timing.of("Check/Physics/Simulator/Base", "Check/Physics/Simulator");
+  public static final Timing CHECK_PHYSICS_SIMULATOR_BASE_COLLIDER = Timing.of("Check/Physics/Simulator/Base/Collider", "Check/Physics/Simulator/Base");
+  public static final Timing CHECK_PHYSICS_SIMULATOR_BASE_COLLIDER_SHAPE_LOOKUP = Timing.of("Check/Physics/Simulator/Base/Collider/ShapeLookup", "Check/Physics/Simulator/Base/Collider");
+  public static final Timing CHECK_PHYSICS_SIMULATOR_BOAT = Timing.of("Check/Physics/Simulator/Boat", "Check/Physics/Simulator");
+  public static final Timing CHECK_PHYSICS_SIMULATOR_ELYTRA = Timing.of("Check/Physics/Simulator/Elytra", "Check/Physics/Simulator");
+  public static final Timing CHECK_PHYSICS_EVAL = Timing.of("Check/Physics/Eval", "Check/Physics/Proc");
+  public static final Timing CHECK_PHYSICS_EVAL_HORIZONTAL = Timing.of("Check/Physics/Eval/H", "Check/Physics/Eval");
+  public static final Timing CHECK_PHYSICS_EVAL_VERTICAL = Timing.of("Check/Physics/Eval/V", "Check/Physics/Eval");
+
+  public static final Timing SERVICE_TYPE_LOOKUP = Timing.of("Service/Lookup/Type");
+
+  public static final Timing SERVICE_RAYTRACER_ENTITY = Timing.of("Service/Raytracer/Entity", "Exe/Netty");
+  public static final Timing SERVICE_RAYTRACER_BLOCK = Timing.of("Service/Raytracer/Block", "Exe/Netty");
+
+  public static final Timing EXE_BACKGROUND_PRIMARY = Timing.of("Exe/Background/Primary");
+  public static final Timing EXE_BACKGROUND_SECONDARY = Timing.of("Exe/Background/Secondary");
+  public static final Timing EXE_BACKGROUND_TERTIARY = Timing.of("Exe/Background/Tertiary");
+  public static final Timing EXE_SERVER = Timing.of("Exe/Server");
+  public static final Timing EXE_NETTY = Timing.of("Exe/Netty");
+
+  public static final Map<String, ChatColor> COLOR_CODE_NAMESPACE = new HashMap<String, ChatColor>() {
+      /*<init>*/ {
+          put("Check", ChatColor.RED);
+          put("Service", ChatColor.YELLOW);
+          put("Exe", ChatColor.GRAY);
+          put("Event", ChatColor.GOLD);
+          put("Packet", ChatColor.DARK_PURPLE);
+      }
+  };
+
+  public static void addTiming(Timing timing) {
+    timingPool.add(timing);
+  }
+
+  public static Timing lookupTimingByName(String name) {
+    return timingPool.stream().filter(timing -> timing.name().equalsIgnoreCase(name)).findFirst().orElse(null);
+  }
+
+  public static Timing eventTimingOf(Event event) {
+    String eventName = classNameCache.computeIfAbsent(event.getClass(), eventClass -> event.getClass().getSimpleName());
+    return eventTimings.computeIfAbsent(eventName, x -> {
+      Timing timing = Timing.of("Event/" + x);
+      timing.specifyAsBukkitEventTiming();
+      return timing;
+    });
+  }
+
+  public static Timing packetTimingOf(PacketType type) {
+    String packetTypeName = type.name();
+    return packetTimings.computeIfAbsent(packetTypeName, x -> {
+      String name = !x.contains("_") ? firstUpper(x) : Arrays.stream(x.split("_")).map(Timings::firstUpper).collect(Collectors.joining());
+      Timing timing = Timing.of("Packet/" + name);
+      timing.specifyAsPacketEventTiming();
+      return timing;
+    });
+  }
+
+  public static String firstUpper(String string) {
+    return string.substring(0, 1).toUpperCase() + string.substring(1).toLowerCase();
+  }
+
+  public static List<Timing> timingPool() {
+    return timingPool;
+  }
+}

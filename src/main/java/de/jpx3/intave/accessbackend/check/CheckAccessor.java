@@ -1,0 +1,116 @@
+package de.jpx3.intave.accessbackend.check;
+
+import com.google.common.base.Preconditions;
+import com.google.common.collect.Maps;
+import de.jpx3.intave.IntavePlugin;
+import de.jpx3.intave.access.check.CheckAccess;
+import de.jpx3.intave.access.check.CheckStatisticsAccess;
+import de.jpx3.intave.access.check.MitigationStrategy;
+import de.jpx3.intave.access.check.UnknownCheckException;
+import de.jpx3.intave.access.player.UnknownPlayerException;
+import de.jpx3.intave.check.Check;
+import de.jpx3.intave.cleanup.ReferenceMap;
+import de.jpx3.intave.math.MathHelper;
+import de.jpx3.intave.user.UserRepository;
+import org.bukkit.entity.Player;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import static de.jpx3.intave.access.check.Check.fromName;
+
+public final class CheckAccessor {
+  private final Map<String, CheckAccess> checkAccessCache = ReferenceMap.soft(Maps.newConcurrentMap());
+  private final IntavePlugin plugin;
+  private final CheckStatisticsAccessor statisticsAccessor;
+
+  public CheckAccessor(IntavePlugin plugin) {
+    this.plugin = plugin;
+    this.statisticsAccessor = new CheckStatisticsAccessor(plugin);
+  }
+
+  public synchronized CheckAccess checkMirrorOf(String name) {
+    Preconditions.checkNotNull(name);
+    return checkAccessCache.computeIfAbsent(name, checkName -> newCheckMirrorOf(tryGetCheck(checkName)));
+  }
+
+  private Check tryGetCheck(String name) {
+    try {
+      return plugin.checks().searchCheck(name);
+    } catch (Exception exception) {
+      throw new UnknownCheckException("Could not find check " + name);
+    }
+  }
+
+  private static final Map<String, Double> DEFAULT_RETURN = new HashMap<>();
+
+  private CheckAccess newCheckMirrorOf(Check check) {
+    return new CheckAccess() {
+      @Override
+      public String name() {
+        return check.name();
+      }
+
+      @Override
+      public de.jpx3.intave.access.check.Check enumCheck() {
+        return fromName(name());
+      }
+
+      @Override
+      public boolean enabled() {
+        return check.enabled();
+      }
+
+      @Override
+      public double violationLevelOf(Player player, String threshold) {
+        if (!UserRepository.hasUser(player)) {
+          throw new UnknownPlayerException("Player " + player.getName() + " couldn't be found");
+        }
+        Map<String, Map<String, Double>> violationLevel = UserRepository.userOf(player).meta().violationLevel().violationLevel;
+        return violationLevel.computeIfAbsent(check.name().toLowerCase(), k -> new HashMap<>()).getOrDefault(threshold, 0.0);
+      }
+
+      @Override
+      public void addViolationPoints(Player player, String threshold, double amount) {
+        if (!UserRepository.hasUser(player)) {
+          throw new UnknownPlayerException("Player " + player.getName() + " couldn't be found");
+        }
+        Map<String, Map<String, Double>> violationLevel = UserRepository.userOf(player).meta().violationLevel().violationLevel;
+        violationLevel.computeIfAbsent(check.name().toLowerCase(), k -> new HashMap<>()).put(threshold, MathHelper.minmax(0, violationLevelOf(player, threshold) + amount, 1000));
+      }
+
+      @Override
+      public void resetViolationLevel(Player player, String threshold) {
+        if (!UserRepository.hasUser(player)) {
+          throw new UnknownPlayerException("Player " + player.getName() + " couldn't be found");
+        }
+        Map<String, Map<String, Double>> violationLevel = UserRepository.userOf(player).meta().violationLevel().violationLevel;
+        violationLevel.computeIfAbsent(check.name().toLowerCase(), k -> new HashMap<>()).put(threshold, 0.0);
+      }
+
+      @Override
+      public void setMitigationStrategy(MitigationStrategy mitigationStrategy) {
+        if (check.mitigationStrategy() == MitigationStrategy.NOT_SUPPORTED) {
+          throw new UnsupportedOperationException("Check " + name() + " does not support mitigation strategies");
+        }
+        check.setMitigationStrategy(mitigationStrategy);
+      }
+
+      @Override
+      public MitigationStrategy mitigationStrategy() {
+        return check.mitigationStrategy();
+      }
+
+      @Override
+      public Map<Integer, List<String>> commandsOf(String threshold) {
+        return check.configuration().settings().thresholdsBy(threshold);
+      }
+
+      @Override
+      public CheckStatisticsAccess statistics() {
+        return null;
+      }
+    };
+  }
+}

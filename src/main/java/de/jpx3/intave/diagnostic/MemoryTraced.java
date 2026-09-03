@@ -1,0 +1,47 @@
+package de.jpx3.intave.diagnostic;
+
+import de.jpx3.intave.IntaveControl;
+import de.jpx3.intave.share.BoundingBox;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
+
+public abstract class MemoryTraced {
+  private static final Map<Class<?>, AtomicLong> objectsLoaded = new ConcurrentHashMap<>();
+  private static final Map<Class<?>, Integer> BYTES = new HashMap<>();
+
+  static {
+    BYTES.put(BoundingBox.class, Double.BYTES * 6);
+//    BYTES.put(BlockState.class, Integer.BYTES * 3 + Integer.BYTES * 3 + Long.BYTES);
+//    BYTES.put(CubeShape.class, Integer.BYTES * 3);
+//    BYTES.put(ArrayBlockShape.class, Double.BYTES * 6 * 3);
+  }
+
+  public MemoryTraced() {
+    if (IntaveControl.ENABLE_MEMTRACE) {
+      objectsLoaded.computeIfAbsent(getClass(), aClass -> new AtomicLong()).incrementAndGet();
+    }
+  }
+
+  public static Map<Class<?>, AtomicLong> tracedClasses() {
+    return objectsLoaded;
+  }
+
+  public static Map<Class<?>, Long> memoryUsage() {
+    Map<Class<?>, Long> memoryUsage = new HashMap<>();
+    for (Map.Entry<Class<?>, AtomicLong> classAtomicLongEntry : objectsLoaded.entrySet()) {
+      Class<?> key = classAtomicLongEntry.getKey();
+      memoryUsage.put(key, classAtomicLongEntry.getValue().get() * BYTES.get(key));
+    }
+    return memoryUsage;
+  }
+
+  @Override
+  protected void finalize() throws Throwable {
+    if (IntaveControl.ENABLE_MEMTRACE) {
+      objectsLoaded.computeIfAbsent(getClass(), aClass -> new AtomicLong()).decrementAndGet();
+    }
+  }
+}
